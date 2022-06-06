@@ -1,43 +1,58 @@
 import os
 import sys
-from datetime import date
 
-from django.db.models import Avg
+from django.core.exceptions import ValidationError
+from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from rest_framework.relations import SlugRelatedField
-from reviews.models import Categories, Comments, Genres, Reviews, Titles
-from users.models import User
+from reviews.models import Category, Comment, Genre, Review, Title
+from users.models import CustomUser
 
 sys.path.append(os.path.abspath('..'))
 
-BLOCK_USERNAME = ('me',)
-
-SCORE_RANGE = 10
+BLOCK_USERNAME = ['me']
+REGULAR_EXPR = r'^[\w.@+-]+$'
+SCORE_RANGE = 11
 
 
 class RegistrationSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(required=True)
-    username = serializers.CharField(required=True)
 
     def validate(self, data):
-        if data['username'] in BLOCK_USERNAME:
-            raise serializers.ValidationError(
-                f"Нельзя использовать имя - {data['username']}"
-            )
-        return data
+        for block_name in BLOCK_USERNAME:
+            if (
+                    data['username'] in block_name
+                    or CustomUser.objects.filter(username=block_name).exists()
+            ):
+                raise serializers.ValidationError(
+                    f"Нельзя использовать имя - {data['username']}"
+                )
+
+            if (
+                    CustomUser.objects.filter(
+                        email=f'{block_name}{REGULAR_EXPR}'
+                    ).exists()
+                    or block_name in data['email']
+            ):
+                raise serializers.ValidationError(
+                    f"В названии почты - {data['email']} - содержатся "
+                    f"недопустимые выражения"
+                )
+            return data
 
     class Meta:
+        model = CustomUser
         fields = (
+            'email',
             'username',
-            'email'
         )
 
 
 class TokenSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(required=True,)
-    confirmation_code = serializers.CharField(required=True,)
+    username = serializers.CharField(required=True, )
+    confirmation_code = serializers.CharField(required=True, )
 
     class Meta:
+        model = CustomUser
         fields = (
             'username',
             'confirmation_code'
@@ -45,140 +60,82 @@ class TokenSerializer(serializers.ModelSerializer):
 
 
 class CategoriesSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(required=True)
-    slug = SlugRelatedField(required=True)
-
     class Meta:
-        fields = (
-            'name',
-            'slug'
-        )
-        model = Categories
+        exclude = ('id',)
+        model = Category
+        lookup_field = 'slug'
 
 
 class GenresSerializer(serializers.ModelSerializer):
-
     class Meta:
         fields = (
             'name',
             'slug'
         )
-        model = Genres
+        model = Genre
 
 
 class TitlesPostSerializer(serializers.ModelSerializer):
-    name = serializers.CharField(required=True)
-    year = serializers.IntegerField(required=True)
-    description = serializers.CharField(required=False)
-    genre = SlugRelatedField(
-        required=True,
-        slug_field='slug',
-        many=True,
-        queryset=Genres.objects.all()
+    category = serializers.SlugRelatedField(
+        queryset=Category.objects.all(),
+        slug_field='slug'
     )
-    category = SlugRelatedField(
-        required=True,
+    genre = serializers.SlugRelatedField(
+        queryset=Genre.objects.all(),
         slug_field='slug',
-        many=False,
-        queryset=Categories.objects.all()
+        many=True
     )
-    rating = serializers.SerializerMethodField()
-
-    def get_avg_rating(self, obj):
-        return Reviews.obj.all().aggregate(Avg('score'))['score__avg']
-
-    def validate(self, data):
-        if data['year'] > date.today():
-            raise serializers.ValidationError(
-                'Некорректная дата'
-            )
-        return data
 
     class Meta:
-        fields = (
-            'id',
-            'name',
-            'year',
-            'rating',
-            'description',
-            'genre',
-            'category'
-        )
-        model = Titles
+        fields = '__all__'
+        model = Title
 
 
 class TitlesGetSerializer(serializers.ModelSerializer):
-    titles_id = serializers.IntegerField(required=True)
-    name = serializers.CharField(required=True)
-    year = serializers.IntegerField(required=True)
-    description = serializers.CharField(required=False)
-    genre = SlugRelatedField(
-        required=True,
-        slug_field='slug',
-        many=True,
-        queryset=Genres.objects.all()
+    category = CategoriesSerializer(read_only=True)
+    genre = GenresSerializer(
+        read_only=True,
+        many=True
     )
-    category = SlugRelatedField(
-        required=True,
-        slug_field='slug',
-        many=False,
-        queryset=Categories.objects.all()
-    )
-    rating = serializers.SerializerMethodField(read_only=True)
-
-    def get_avg_rating(self, obj):
-        return Reviews.obj.all().aggregate(Avg('score'))['score__avg']
+    rating = serializers.IntegerField(read_only=True)
 
     class Meta:
-        fields = (
-            'id',
-            'name',
-            'year',
-            'rating',
-            'description',
-            'genre',
-            'category'
-        )
-        read_only_fields = '__all__'
-        model = Titles
+        fields = '__all__'
+        model = Title
 
 
 class ReviewsSerializer(serializers.ModelSerializer):
-    title_id = serializers.IntegerField(required=True)
-    text = serializers.CharField(required=True)
-    score = serializers.IntegerField(
-        required=True,
-        max_value=10,
-        min_value=0
+    title = serializers.SlugRelatedField(
+        slug_field='name',
+        read_only=True
     )
-    author = SlugRelatedField(
+    author = serializers.SlugRelatedField(
         read_only=True,
         slug_field='username'
     )
 
-    def validate_score(self, data):
-        if data['score'] not in range(SCORE_RANGE):
+    def validate_score(self, value):
+        if value not in range(SCORE_RANGE):
             raise serializers.ValidationError(
                 'Оценка некорректна, выберите число от 1 до 10'
             )
-        return data
+        return value
 
-    def validate_author(self, data):
-        if self.context['request'].method == 'POST':
-            user = self.context['request'].user
-            title_id = self.context['request'].title_id
-            if Reviews.objects.filter(
-                    user=user,
-                    title_id=title_id
-            ).exists():
-                raise serializers.ValidationError(
-                    'Вы уже оставляли отзыв на произведение'
-                )
+    def validate(self, data):
+        request = self.context['request']
+        author = request.user
+        title_id = self.context.get('view').kwargs.get('title_id')
+        title = get_object_or_404(Title, pk=title_id)
+        if (
+                request.method == 'POST'
+                and Review.objects.filter(title=title, author=author).exists()
+        ):
+            raise ValidationError('Может существовать только один отзыв!')
         return data
 
     class Meta:
         fields = '__all__'
-        model = Reviews
+        model = Review
 
 
 class CommentsSerializer(serializers.ModelSerializer):
@@ -186,25 +143,17 @@ class CommentsSerializer(serializers.ModelSerializer):
         read_only=True,
         slug_field='username'
     )
+    review = serializers.SlugRelatedField(
+        slug_field='text',
+        read_only=True
+    )
 
     class Meta:
-        fields = (
-            'id',
-            'text',
-            'author',
-            'pub_date'
-        )
-        model = Comments
+        fields = '__all__'
+        model = Comment
 
 
 class UserSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(required=True)
-    email = serializers.EmailField(required=True)
-    first_name = serializers.CharField(required=False)
-    last_name = serializers.CharField(required=False)
-    bio = serializers.CharField()
-    role = serializers.CharField()
-
     class Meta:
         fields = (
             'username',
@@ -214,8 +163,7 @@ class UserSerializer(serializers.ModelSerializer):
             'bio',
             'role'
         )
-        model = User
-        unique_together = ('username', 'email')
+        model = CustomUser
 
 
 class UserMySelfSerializer(serializers.ModelSerializer):
@@ -224,7 +172,7 @@ class UserMySelfSerializer(serializers.ModelSerializer):
     first_name = serializers.CharField(required=False)
     last_name = serializers.CharField(required=False)
     bio = serializers.CharField()
-    role = serializers.CharField()
+    role = serializers.CharField(read_only=True)
 
     class Meta:
         fields = (
@@ -235,5 +183,4 @@ class UserMySelfSerializer(serializers.ModelSerializer):
             'bio',
             'role'
         )
-        model = User
-        read_only_fields = 'role'
+        model = CustomUser

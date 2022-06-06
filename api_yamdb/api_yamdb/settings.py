@@ -23,11 +23,11 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'reviews',
-    'users.apps.UsersConfig',
     'rest_framework_simplejwt',
-    'django_filters',
     'api',
+    'users',
+    'reviews',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
@@ -116,9 +116,12 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+    ],
     'DEFAULT_PAGINATION_CLASS':
-        'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 5,
+        'rest_framework.pagination.LimitOffsetPagination',
+    'PAGE_SIZE': 10,
 }
 
 SIMPLE_JWT = {
@@ -126,7 +129,7 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+AUTH_USER_MODEL = 'users.CustomUser'
 
 EMAIL_HOST = 'smtp.gmail.com'
 
@@ -139,5 +142,3 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 
 EMAIL_USE_SSL = False
-
-AUTH_USER_MODEL = 'users.CustomUser'

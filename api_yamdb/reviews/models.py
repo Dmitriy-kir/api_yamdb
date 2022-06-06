@@ -1,8 +1,9 @@
 import datetime as dt
+
+from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
-from django.core.exceptions import ValidationError
-from .models import User
+from users.models import CustomUser
 
 
 def validate_year(value):
@@ -12,7 +13,7 @@ def validate_year(value):
 
 class Category(models.Model):
     name = models.CharField(
-        max_length=30,
+        max_length=256,
         verbose_name='Категория'
     )
     slug = models.SlugField(
@@ -30,7 +31,7 @@ class Category(models.Model):
 
 class Genre(models.Model):
     name = models.CharField(
-        max_length=30,
+        max_length=256,
         verbose_name='Жанр'
     )
     slug = models.SlugField(
@@ -48,20 +49,22 @@ class Genre(models.Model):
 
 class Title(models.Model):
     name = models.CharField(
-        max_length=50,
+        max_length=256,
         verbose_name='Произведение',
     )
     year = models.IntegerField(
         verbose_name='Дата выхода',
-        validators=(validate_year)
+        validators=(validate_year,)
     )
     description = models.TextField(
         blank=True,
         verbose_name='Описание',
+        null=True,
     )
     genre = models.ManyToManyField(
         Genre,
         verbose_name='Жанр',
+        related_name='titles',
     )
     category = models.ForeignKey(
         Category,
@@ -94,17 +97,23 @@ class Review(models.Model):
         validators=(MinValueValidator(1), MaxValueValidator(10))
     )
     author = models.ForeignKey(
-        Title,
+        CustomUser,
         on_delete=models.CASCADE,
         related_name='rewiews',
         verbose_name='Произведение'
     )
+    title = models.ForeignKey(
+        Title,
+        on_delete=models.CASCADE,
+        related_name='reviews',
+        verbose_name='произведение'
+    )
 
     class Meta:
         ordering = ['-pub_date']
-        constants = [
-            models.UnicodeConstant(
-                fields=('autor', 'title'),
+        constraints = [
+            models.UniqueConstraint(
+                fields=('author', 'title'),
                 name='one_review_per_title'
             ),
         ]
@@ -116,7 +125,7 @@ class Review(models.Model):
 
 
 class Comment(models.Model):
-    reviews = models.ForeignKey(
+    review = models.ForeignKey(
         Review,
         on_delete=models.CASCADE,
         blank=True,
@@ -125,7 +134,7 @@ class Comment(models.Model):
         verbose_name='Отзыв'
     )
     author = models.ForeignKey(
-        User,
+        CustomUser,
         on_delete=models.CASCADE,
         related_name='comments',
         verbose_name='Автор комментария',
